@@ -1,0 +1,74 @@
+#include "imports/stdlib.fc";
+
+int equal_slices (slice a, slice b) asm "SDEQ";
+
+(slice, int) load_data() inline {
+    slice ds = get_data().begin_parse();
+    int total_liquidity = ds~load_uint(64);
+    slice owner_addr = ds~load_msg_addr();
+    return (owner_addr, total_liquidity);
+}
+
+() save_liquidity(int total_liquidity) impure {
+    set_data(begin_cell().store_uint(total_liquidity,64).end_cell());
+}
+
+
+() deposit(int amount) impure {
+    ;; Проверяем, что пользователь отправил положительную сумму
+    throw_if(102, amount <= 0); ;; Ошибка: нельзя отправить 0 или отрицательную сумму
+
+    (slice owner_addr, int total_liquidity) = load_data();
+    ;; Добавляем средства в пул
+    total_liquidity += amount;
+
+    save_liquidity(total_liquidity);
+}
+
+;; Функция вывода средств: только владелец
+() withdraw(int amount, slice address) impure {
+    ;; Проверяем, является ли отправитель владельцем контракта
+    (slice owner_addr, int total_liquidity) = load_data();
+		if equal_slices(address, owner_addr){
+        throw(103); ;; Ошибка: только владелец может снимать средства
+    }
+    
+    ;; Проверяем, достаточно ли средств в пуле
+    if (amount > total_liquidity) {
+        throw(104); ;; Ошибка: недостаточно средств в пуле
+    }
+
+    ;; Уменьшаем общую ликвидность
+    total_liquidity -= amount;
+    save_liquidity(total_liquidity);
+    ;; Отправляем средства владельцу
+    var msg = begin_cell()
+                .store_slice(owner_addr)
+                .store_uint(amount, 32)
+              .end_cell();
+    send_raw_message(msg, 1);
+}
+
+
+;; Функция обработки входящего сообщения
+() recv_internal(int msg_value, cell in_msg, slice in_body) impure {
+    int op_code = in_body~load_uint(32); 
+    if (op_code == 1) {
+        deposit(msg_value);
+    } elseif (op_code == 2) {
+        withdraw(in_body~load_int(64), in_body~load_msg_addr()); ;; Снимаем указанное количество
+    } else {
+        throw(101); ;; Неподдерживаемая операция
+    }
+}
+
+int getLiquidity() method_id {
+   slice ds = get_data().begin_parse();
+   int total_liquidity = ds~load_uint(64);
+   return total_liquidity;
+}
+slice getOwner() method_id {
+    slice ds = get_data().begin_parse();
+    slice owner_addr = ds~load_msg_addr();
+    return owner_addr;
+}

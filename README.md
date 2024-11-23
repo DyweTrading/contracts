@@ -1,4 +1,4 @@
-# my-first-pool-sc
+# Liquidity pool
 
 ## Project structure
 
